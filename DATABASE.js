@@ -7,20 +7,20 @@ const DB_INSTANCES = new WeakMap();
  * Splits JSON data if reaches 32k byte limit of dynamic properties.
  */
 export class Database {
-    static MAX_CHUNK_SIZE = 32767;
+    /**@private */ static MAX_CHUNK_SIZE = 32767;
     
-    static INTERNAL_DB_PREFIX = "§▌";
-    static KEY_TYPE_NATIVE = "N_";
-    static KEY_TYPE_STRING = "S_";
-    static KEY_TYPE_META_CHUNK = "M_";
-    static KEY_TYPE_DATA_CHUNK = "D_";
+    /**@private */ static INTERNAL_DB_PREFIX = "§▌";
+    /**@private */ static KEY_TYPE_NATIVE = "N_";
+    /**@private */ static KEY_TYPE_STRING = "S_";
+    /**@private */ static KEY_TYPE_META_CHUNK = "M_";
+    /**@private */ static KEY_TYPE_DATA_CHUNK = "D_";
 
-    _storageSource;
-    _databaseId;
-    _fullPrefixBase;
-    _dataCache = new Map();
-    _knownKeys = new Set();
-    _autoCache = true;
+    /**@private */ _storageSource;
+    /**@private */ _databaseId;
+    /**@private */ _fullPrefixBase;
+    /**@private */ _dataCache = new Map();
+    /**@private */ _knownKeys = new Set();
+    /**@private */ _autoCache = true;
     
     /**
      * Create a new database instance
@@ -219,22 +219,26 @@ export class Database {
     enableCache() { this._autoCache = true; }
     disableCache() { this._autoCache = false; }
 
+    /**@private */
     _cacheValue(key, value) {
         if (this._autoCache) this._dataCache.set(key, value);
         return value;
     }
 
+    /**@private */
     _isVector(value) {
         return value && ['x','y','z'].every(k => typeof value[k] === 'number') && 
             Object.keys(value).length === 3;
     }
 
+    /**@private */
     _checkKeyExists(key) {
         return [Database.KEY_TYPE_NATIVE, Database.KEY_TYPE_STRING, Database.KEY_TYPE_META_CHUNK].some(t =>
             this._storageSource.getDynamicProperty(this._buildKey(key, t)) !== undefined
         );
     }
 
+    /**@private */
     _initializeFromProperties() {
         const props = this._storageSource.getDynamicPropertyIds().filter(id => 
             id.startsWith(this._fullPrefixBase));
@@ -246,6 +250,7 @@ export class Database {
         });
     }
 
+    /**@private */
     _splitIntoChunks(str) {
         const chunks = [];
         for (let i = 0; i < str.length; i += Database.MAX_CHUNK_SIZE) {
@@ -254,12 +259,14 @@ export class Database {
         return chunks;
     }
 
+    /**@private */
     _buildKey(key, type, index) {
         return type === Database.KEY_TYPE_DATA_CHUNK 
             ? `${this._fullPrefixBase}${type}${key}_${index}`
             : `${this._fullPrefixBase}${type}${key}`;
     }
 
+    /**@private */
     _deleteKeyChunks(key) {
         [Database.KEY_TYPE_NATIVE, Database.KEY_TYPE_STRING, Database.KEY_TYPE_META_CHUNK].forEach(t => 
             this._storageSource.setDynamicProperty(this._buildKey(key, t)));
