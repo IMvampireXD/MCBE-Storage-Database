@@ -2,8 +2,13 @@ import { world, system } from "@minecraft/server";
 
 const DB_INSTANCES = new WeakMap();
 
+/**
+ * A Storage Database class for Minecraft Bedrock Script API.
+ * Splits JSON data if reaches 32k byte limit of dynamic properties.
+ */
 export class Database {
     static MAX_CHUNK_SIZE = 32767;
+    
     static INTERNAL_DB_PREFIX = "§▌";
     static KEY_TYPE_NATIVE = "N_";
     static KEY_TYPE_STRING = "S_";
@@ -16,7 +21,12 @@ export class Database {
     _dataCache = new Map();
     _knownKeys = new Set();
     _autoCache = true;
-
+    
+    /**
+     * Create a new database instance
+     * @param {string} id - Unique database identifier
+     * @param {World|Entity} [source=world] - Storage target (world or entity)
+     */
     constructor(id, source = world) {
         if (typeof id !== "string" || !id.trim()) throw new Error("Invalid database ID");
         if (DB_INSTANCES.get(source)?.has(id)) return DB_INSTANCES.get(source).get(id);
@@ -30,10 +40,12 @@ export class Database {
         DB_INSTANCES.get(source).set(id, this);
     }
 
-    static get(id, source = world) {
-        return new Database(id, source);
-    }
-
+    /**
+     * Store a value in the database
+     * @param {string} key - Key to store under
+     * @param {any} value - Value to store
+     * @returns {Database} Self for chaining
+     */
     set(key, value) {
         if (typeof key !== 'string' || !key.trim()) throw new Error("Key must be a non-empty string");
         this._deleteKeyChunks(key);
@@ -66,7 +78,12 @@ export class Database {
         if (this._autoCache) this._dataCache.set(key, value);
         return this;
     }
-
+    
+    /**
+     * Retrieve a stored value
+     * @param {string} key - Key to retrieve
+     * @returns {any} Stored value or undefined
+     */
     get(key) {
         if (typeof key !== 'string' || !key.trim()) throw new Error("Key must be a non-empty string");
         if (this._dataCache.has(key)) return this._dataCache.get(key);
@@ -92,8 +109,13 @@ export class Database {
             return this._cacheValue(key, stringVal);
         }
     }
-
-    delete(key) {
+    
+    /**
+     * Delete a key and its associated data
+     * @param {string} key - Key to delete
+     * @returns {boolean} True if key existed
+     */
+    deleteKey(key) {
         if (typeof key !== 'string' || !key.trim()) throw new Error("Key must be a non-empty string");
         const exists = this.has(key);
         this._deleteKeyChunks(key);
@@ -101,11 +123,16 @@ export class Database {
         this._knownKeys.delete(key);
         return exists;
     }
-
+    
+    /**
+     * Delete value inside key.
+     * @param {string} key - The key which the data was saved in.
+     */
     deleteValue(key) {
         this.set(key, undefined);
     }
 
+    /** Clear all database entries */
     clear() {
         this._storageSource.getDynamicPropertyIds()
             .filter(id => id.startsWith(this._fullPrefixBase))
@@ -114,18 +141,26 @@ export class Database {
         this._knownKeys.clear();
     }
 
+    /**
+     * Check if key exists
+     * @param {string} key - Key to check
+     * @returns {boolean} - Existence status
+     */
     has(key) {
         return this._dataCache.has(key) || this._knownKeys.has(key) || this._checkKeyExists(key);
     }
 
+    /** Iterate over all keys */
     *keys() {
         yield* this._knownKeys.values();
     }
 
+    /** Iterate over all values */
     *values() {
         for (const key of this.keys()) yield this.get(key);
     }
 
+    /** Iterate over key-value pairs */
     *entries() {
         for (const key of this.keys()) yield [key, this.get(key)];
     }
@@ -134,24 +169,44 @@ export class Database {
         return this.entries();
     }
 
+    /** Get total stored keys count */
     get size() {
         return this._knownKeys.size;
     }
-
+    
+    /**
+     * Preload value into cache
+     * @param {string} key - Key to load
+     */
     load(key) {
         if (!this._dataCache.has(key)) this.get(key);
     }
-
+    
+    /**
+     * Remove value from cache
+     * @param {string} key - Key to unload
+     */
     unload(key) {
         this._dataCache.delete(key);
     }
-
+    
+    /**
+     * Asynchronously get value
+     * @async
+     * @param {string} key - Key to retrieve
+     */
     async getAsync(key) {
         return new Promise(resolve => 
             system.run(() => resolve(this.get(key)))
         );
     }
-
+    
+    /**
+     * Asynchronously set value
+     * @async
+     * @param {string} key - Key to store
+     * @param {any} value - Value to store
+     */
     async setAsync(key, value) {
         return new Promise(resolve =>
             system.run(() => {
