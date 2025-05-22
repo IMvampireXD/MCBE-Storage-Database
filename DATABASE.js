@@ -1,4 +1,4 @@
-import { World, world, Entity, system } from "@minecraft/server";
+import { world, system } from "@minecraft/server";
 
 const DB_INSTANCES = new WeakMap();
 
@@ -10,18 +10,15 @@ export class Database {
     static KEY_TYPE_META_CHUNK = "M_";
     static KEY_TYPE_DATA_CHUNK = "D_";
 
-    /** @private */ _storageSource;
-    /** @private */ _databaseId;
-    /** @private */ _fullPrefixBase;
-    /** @private */ _dataCache = new Map();
-    /** @private */ _knownKeys = new Set();
-    /** @private */ _autoCache = true;
+    _storageSource;
+    _databaseId;
+    _fullPrefixBase;
+    _dataCache = new Map();
+    _knownKeys = new Set();
+    _autoCache = true;
 
-    /**
-     * @param {string} id 
-     * @param {World|Entity} [source=world]
-     */
     constructor(id, source = world) {
+        if (typeof id !== "string" || !id.trim()) throw new Error("Invalid database ID");
         if (DB_INSTANCES.get(source)?.has(id)) return DB_INSTANCES.get(source).get(id);
         
         this._databaseId = id;
@@ -33,45 +30,12 @@ export class Database {
         DB_INSTANCES.get(source).set(id, this);
     }
 
-    /** @private */
-    _initializeFromProperties() {
-        const props = this._storageSource.getDynamicPropertyIds().filter(id => 
-            id.startsWith(this._fullPrefixBase));
-        const keyRegex = new RegExp(`${this._fullPrefixBase}(?:${Database.KEY_TYPE_NATIVE}|${Database.KEY_TYPE_STRING}|${Database.KEY_TYPE_META_CHUNK})(.+)|${this._fullPrefixBase}${Database.KEY_TYPE_DATA_CHUNK}(.+?)_\\d+$`);
-        
-        props.forEach(prop => {
-            const match = prop.match(keyRegex);
-            if (match) this._knownKeys.add(match[1] || match[2]);
-        });
+    static get(id, source = world) {
+        return new Database(id, source);
     }
 
-    /** @private */
-    _buildKey(key, type, index) {
-        return type === Database.KEY_TYPE_DATA_CHUNK 
-            ? `${this._fullPrefixBase}${type}${key}_${index}`
-            : `${this._fullPrefixBase}${type}${key}`;
-    }
-
-    /** @private */
-    _deleteKeyChunks(key) {
-        [Database.KEY_TYPE_NATIVE, Database.KEY_TYPE_STRING, Database.KEY_TYPE_META_CHUNK].forEach(t => 
-            this._storageSource.setDynamicProperty(this._buildKey(key, t)));
-        
-        const chunkCount = this._storageSource.getDynamicProperty(this._buildKey(key, Database.KEY_TYPE_META_CHUNK));
-        if (typeof chunkCount === 'number') {
-            for (let i = 0; i < chunkCount; i++) {
-                this._storageSource.setDynamicProperty(this._buildKey(key, Database.KEY_TYPE_DATA_CHUNK, i));
-            }
-        }
-    }
-
-    /**
-     * @param {string} key
-     * @param {any} value
-     * @returns {Database}
-     */
     set(key, value) {
-        if (typeof key !== 'string') return this;
+        if (typeof key !== 'string' || !key.trim()) throw new Error("Key must be a non-empty string");
         this._deleteKeyChunks(key);
         this._dataCache.delete(key);
 
@@ -86,12 +50,11 @@ export class Database {
         }
 
         if (typeof processed === 'string' && processed.length > Database.MAX_CHUNK_SIZE) {
-            const chunkCount = Math.ceil(processed.length / Database.MAX_CHUNK_SIZE);
-            this._storageSource.setDynamicProperty(this._buildKey(key, Database.KEY_TYPE_META_CHUNK), chunkCount);
-            for (let i = 0; i < chunkCount; i++) {
-                const chunk = processed.substr(i * Database.MAX_CHUNK_SIZE, Database.MAX_CHUNK_SIZE);
+            const chunks = this._splitIntoChunks(processed);
+            this._storageSource.setDynamicProperty(this._buildKey(key, Database.KEY_TYPE_META_CHUNK), chunks.length);
+            chunks.forEach((chunk, i) => {
                 this._storageSource.setDynamicProperty(this._buildKey(key, Database.KEY_TYPE_DATA_CHUNK, i), chunk);
-            }
+            });
         } else if (this._isVector(value)) {
             this._storageSource.setDynamicProperty(this._buildKey(key, Database.KEY_TYPE_NATIVE), value);
         } else {
@@ -104,11 +67,8 @@ export class Database {
         return this;
     }
 
-    /**
-     * @param {string} key
-     * @returns {any}
-     */
     get(key) {
+        if (typeof key !== 'string' || !key.trim()) throw new Error("Key must be a non-empty string");
         if (this._dataCache.has(key)) return this._dataCache.get(key);
         if (!this._knownKeys.has(key) && !this._checkKeyExists(key)) return;
 
@@ -133,35 +93,17 @@ export class Database {
         }
     }
 
-    /** @private */
-    _cacheValue(key, value) {
-        if (this._autoCache) this._dataCache.set(key, value);
-        return value;
-    }
-
-    /** @private */
-    _isVector(value) {
-        return value && ['x','y','z'].every(k => typeof value[k] === 'number') && 
-            Object.keys(value).length === 3;
-    }
-
-    /** @private */
-    _checkKeyExists(key) {
-        return [Database.KEY_TYPE_NATIVE, Database.KEY_TYPE_STRING, Database.KEY_TYPE_META_CHUNK].some(t =>
-            this._storageSource.getDynamicProperty(this._buildKey(key, t)) !== undefined
-        );
-    }
-
-    /**
-     * @param {string} key
-     * @returns {boolean}
-     */
     delete(key) {
+        if (typeof key !== 'string' || !key.trim()) throw new Error("Key must be a non-empty string");
         const exists = this.has(key);
         this._deleteKeyChunks(key);
         this._dataCache.delete(key);
         this._knownKeys.delete(key);
         return exists;
+    }
+
+    deleteValue(key) {
+        this.set(key, undefined);
     }
 
     clear() {
@@ -172,10 +114,6 @@ export class Database {
         this._knownKeys.clear();
     }
 
-    /**
-     * @param {string} key
-     * @returns {boolean}
-     */
     has(key) {
         return this._dataCache.has(key) || this._knownKeys.has(key) || this._checkKeyExists(key);
     }
@@ -200,22 +138,13 @@ export class Database {
         return this._knownKeys.size;
     }
 
-    /**
-     * @param {string} key
-     */
     load(key) {
         if (!this._dataCache.has(key)) this.get(key);
     }
 
-    /**
-     * @param {string} key
-     */
     unload(key) {
         this._dataCache.delete(key);
     }
-
-    enableCache() { this._autoCache = true; }
-    disableCache() { this._autoCache = false; }
 
     async getAsync(key) {
         return new Promise(resolve => 
@@ -230,5 +159,61 @@ export class Database {
                 resolve();
             })
         );
+    }
+
+    enableCache() { this._autoCache = true; }
+    disableCache() { this._autoCache = false; }
+
+    _cacheValue(key, value) {
+        if (this._autoCache) this._dataCache.set(key, value);
+        return value;
+    }
+
+    _isVector(value) {
+        return value && ['x','y','z'].every(k => typeof value[k] === 'number') && 
+            Object.keys(value).length === 3;
+    }
+
+    _checkKeyExists(key) {
+        return [Database.KEY_TYPE_NATIVE, Database.KEY_TYPE_STRING, Database.KEY_TYPE_META_CHUNK].some(t =>
+            this._storageSource.getDynamicProperty(this._buildKey(key, t)) !== undefined
+        );
+    }
+
+    _initializeFromProperties() {
+        const props = this._storageSource.getDynamicPropertyIds().filter(id => 
+            id.startsWith(this._fullPrefixBase));
+        const keyRegex = new RegExp(`${this._fullPrefixBase}(?:${Database.KEY_TYPE_NATIVE}|${Database.KEY_TYPE_STRING}|${Database.KEY_TYPE_META_CHUNK})(.+)|${this._fullPrefixBase}${Database.KEY_TYPE_DATA_CHUNK}(.+?)_\\d+$`);
+        
+        props.forEach(prop => {
+            const match = prop.match(keyRegex);
+            if (match) this._knownKeys.add(match[1] || match[2]);
+        });
+    }
+
+    _splitIntoChunks(str) {
+        const chunks = [];
+        for (let i = 0; i < str.length; i += Database.MAX_CHUNK_SIZE) {
+            chunks.push(str.substring(i, i + Database.MAX_CHUNK_SIZE));
+        }
+        return chunks;
+    }
+
+    _buildKey(key, type, index) {
+        return type === Database.KEY_TYPE_DATA_CHUNK 
+            ? `${this._fullPrefixBase}${type}${key}_${index}`
+            : `${this._fullPrefixBase}${type}${key}`;
+    }
+
+    _deleteKeyChunks(key) {
+        [Database.KEY_TYPE_NATIVE, Database.KEY_TYPE_STRING, Database.KEY_TYPE_META_CHUNK].forEach(t => 
+            this._storageSource.setDynamicProperty(this._buildKey(key, t)));
+        
+        const chunkCount = this._storageSource.getDynamicProperty(this._buildKey(key, Database.KEY_TYPE_META_CHUNK));
+        if (typeof chunkCount === 'number') {
+            for (let i = 0; i < chunkCount; i++) {
+                this._storageSource.setDynamicProperty(this._buildKey(key, Database.KEY_TYPE_DATA_CHUNK, i));
+            }
+        }
     }
 }
